@@ -23,6 +23,12 @@
     #error "No support for Apple"
 #endif
 
+#if defined(__has_include)
+    #if __has_include(<valgrind/memcheck.h>)
+        #include <valgrind/memcheck.h>
+    #endif
+#endif
+
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -133,7 +139,7 @@ public:
         // Застолбить виртуальную область под будущее разбиение на 2 блока
         m_base = mmap(
             nullptr,                                        // Дать системе подобрать адрес, выровненный по размеру страницы
-            2*m_size,                                       // Объём под два будущих блока
+            m_size << 1,                                    // Объём под два будущих блока
             PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0   // Создать блок в приватной области памяти, без доступа. Доступ будет дан двум будущим блокам
         );
         if (MAP_FAILED == m_base)
@@ -141,6 +147,10 @@ public:
             throw std::runtime_error(
                 syscallFailureMessage("Failed to reserve virtual space"));
         }
+
+    #ifdef __MEMCHECK_H
+        VALGRIND_MALLOCLIKE_BLOCK(m_base, m_size << 1, 0, 0);
+    #endif
 
         // Узнать версию ядра.
         // Создать временный файл для отображения в RAM
@@ -157,7 +167,7 @@ public:
         }
         else // Реализация через анонимный файл
         {
-            strcpy(m_fileName, "ring_buffer_tempfile");
+            strcpy(m_fileName, "ring_buffer_tempfile"); // Файл не хранится на диске, поэтому название не обязано быть уникальным https://man7.org/linux/man-pages/man2/memfd_create.2.html
             m_fileDesc = memfd_create(m_fileName, MFD_CLOEXEC); // Создать уникальный анонимный файл
         }
 
@@ -271,7 +281,10 @@ private:
     {
         if (m_base && m_size > 0)
         {
-            if (0 != munmap(m_base, 2*m_size))
+        #ifdef __MEMCHECK_H
+            VALGRIND_FREELIKE_BLOCK(m_base, 0);
+        #endif
+            if (0 != munmap(m_base, m_size << 1))
             {
                 const auto explain = syscallFailureMessage("Failed to ummap pages");
                 printf("Error while cleaning up: %s", explain.c_str());
