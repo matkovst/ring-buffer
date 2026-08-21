@@ -527,6 +527,39 @@ TEST_CASE("test_mat_storage")
             Mat image2d(shape.rows, shape.cols, shape.type, ring.head());
             randu(image2d, 0.0, 255.0);
 
+            const Mat retrievedImage2d(shape.rows, shape.cols, shape.type, ring.element(-1));
+            REQUIRE(image2d == retrievedImage2d);
+
+            // Сравнить содержимое левой и правой части буфера
+            {
+                const uint8_t* leftData = reinterpret_cast<const uint8_t*>(ring.left());
+                const uint8_t* rightData = reinterpret_cast<const uint8_t*>(ring.right());
+
+                const Mat leftView(1, ring.capacity()*shape.rows*shape.cols, shape.type, (void*)leftData);
+                const Mat rightView(1, ring.capacity()*shape.rows*shape.cols, shape.type, (void*)rightData);
+                REQUIRE(leftView == rightView);
+                // std::cout << mean(image2d) << std::endl;
+            }
+        }
+    }
+
+    for (auto shape : {Shape2d{4, 128, 128, CV_8UC1}, Shape2d{4, 128, 128, CV_8UC3}, 
+                       Shape2d{32, 16, 16, CV_32FC1}, Shape2d{32, 16, 16, CV_32FC3}})
+    {
+        const Mat reference(shape.rows, shape.cols, shape.type, nullptr);
+        RingBuffer ring(shape.length, reference.total() * reference.elemSize());
+
+        for (size_t i = 0; i < 3*ring.capacity(); ++i)
+        {
+            auto sample = std::make_unique<uint8_t[]>(ring.elemSize());
+            Mat image2d(shape.rows, shape.cols, shape.type, sample.get());
+            randu(image2d, 0.0, 255.0);
+
+            ring.put(image2d.data);
+
+            const Mat retrievedImage2d(shape.rows, shape.cols, shape.type, ring.element(-1));
+            REQUIRE(image2d == retrievedImage2d);
+
             // Сравнить содержимое левой и правой части буфера
             {
                 const uint8_t* leftData = reinterpret_cast<const uint8_t*>(ring.left());
@@ -593,9 +626,15 @@ TEST_CASE("test_video_storage" *
 
         CImgDisplay display(std::sqrt(ring.capacity())*cols, std::sqrt(ring.capacity())*rows, caseName.c_str());
 
+        const std::string src(__FILE__);
+        const size_t slash = src.find_last_of("\\/");
+        if (std::string::npos == slash)
+            FAIL("Failed to get directory of " << src);
+        const std::string srcDir = src.substr(0, slash);
+
         for (size_t t = 0; t < frames; ++t)
         {
-            std::string frameFile("/home/stas/projects/myprototypes/ring-buffer/data/");
+            std::string frameFile = srcDir + "/data/";
             frameFile.append(std::to_string(t));
             frameFile.append(".bmp");
 
@@ -639,7 +678,7 @@ TEST_CASE("test_video_storage" *
     }
     catch (const CImgIOException& error)
     {
-        FAIL("Error while reading files: " << error.what() << " Be sure file exist.");
+        FAIL("Error while reading files: " << error.what() << ". Be sure file exist.");
     }
     catch (const CImgException& error)
     {
