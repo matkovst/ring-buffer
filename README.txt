@@ -34,7 +34,13 @@
 
 Профилирование по системных счетчикам
 
-    perf stat --repeat=32 -dd ./ring_buffer_perftests ring 1
+    perf stat --repeat=32 -dd ./ring_buffer_perftests ring read 1
 
-    Первый аргумент - тип теста: malloc, mmap, ring
-    Второй аргумент - условный объем буфера, по возрастанию: 0, 1, 2
+    argv[1] - тип теста    : malloc, mmap, ring
+    argv[2] - операция     : read, write
+    argv[3] - объем (у.е.) : 0, 1, 2
+
+Поиск узких мест
+
+    perf record -e instructions,branches,branch-misses ./ring_buffer_perftests ring read 1
+    perf report
