@@ -9,7 +9,14 @@
  *  Пример компиляции (Linux + CImg):
  *      clang++ ring_buffer_tests.cpp -Wall -Wextra -Wno-unused-function -Dcimg_display=1 -o test -lX11 -lpthread
  * 
+ *  Пример компиляции (Windows + CImg):
+ *      cl /FC ring_buffer_tests.cpp /EHsc /std:c++17 /Dcimg_display=2
+ * 
  */
+
+#ifdef _WIN32
+    #define NOMINMAX
+#endif
 
 #include <iostream>
 #include <iomanip>
@@ -141,6 +148,22 @@ namespace
         }
         return true;
     }
+
+#ifdef _WIN32
+    bool enableVTMode()
+    {
+        HANDLE stdHan = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (INVALID_HANDLE_VALUE == stdHan)
+            return false;
+
+        DWORD mode = 0;
+        if (!GetConsoleMode(stdHan, &mode))
+            return false;
+
+        mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        return SetConsoleMode(stdHan, mode);
+    }
+#endif
 }
 
 TEST_CASE("test_allocator")
@@ -582,13 +605,11 @@ TEST_CASE("test_mat_storage")
     #pragma message("test_video_storage SKIPPED (cimg_display not set)")
 #endif
 
-TEST_CASE("test_video_storage" * 
-    #if defined(cimg_version) && (0 != cimg_display)
-        doctest::skip(false)
-    #else
-        doctest::skip(true)
-    #endif
-)
+#if defined(cimg_version) && (0 != cimg_display)
+TEST_CASE("test_video_storage" * doctest::skip(false))
+#else
+TEST_CASE("test_video_storage" * doctest::skip(true))
+#endif
 {
     /*
         Проверить хранение тестовой раскадровки в буфере и показ раскадровки из буфера.
@@ -689,7 +710,17 @@ TEST_CASE("test_video_storage" *
 
 int main(int argc, char* argv[]) try
 {
+#ifdef _WIN32
+    if (!enableVTMode())
+        std::clog << "Failed to enable ANSI colors" << std::endl;
+#endif
+
+#if defined(__linux__)
     LOG_INFO << "Sys release : " << getLinuxSystem().release << '\n';
+#elif defined(_WIN32)
+    LOG_INFO << "Sys release : " << getWindowsSystem() << '\n';
+    LOG_INFO << "Granularity : " << getGranularity() << '\n';
+#endif
     LOG_INFO << "Page size   : " << getPageSize() << '\n';
     LOG_INFO << "File limit  : " << getFileLimit() << '\n';
     LOG_INFO << "RAM size    : " << getRamSize() << '\n' << '\n';

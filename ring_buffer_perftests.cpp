@@ -82,6 +82,8 @@ int mallocTest(size_t capacity, int op)
 template<typename T>
 int mmapTest(size_t capacity, int op)
 {
+#if defined(__linux__)
+
     volatile auto buffer = reinterpret_cast<uint8_t*>(
         mmap(
             NULL, 2*capacity*sizeof(T), 
@@ -105,6 +107,13 @@ int mmapTest(size_t capacity, int op)
     }
 
     munmap(buffer, 2*capacity*sizeof(T));
+
+#else
+
+    #pragma message("mmap test not supported on your platform")
+
+#endif
+
     return 0;
 }
 

@@ -4,29 +4,48 @@
 Однофайловая реализация кругового буфера на C++ без сторонних зависимостей.
 Два соседних виртуальных блока транслируются на общую физическую память, что позволяет поддерживать содержимое буфера в непрерывном и упорядоченном виде.
 
-Требуется поддержка C++11 или выше.
+Требования:
+    - Linux, Windows
+    - Компилятор с поддержкой C++11 и выше
 
-Компиляция
-==========
+Состав проекта:
+    3rdparty/                 Сторонние библиотеки для упрощения тестирования
+    data/                     Тестовая раскадровка
+    opencv_like.h             Частичный копипаст функционала из OpenCV Core чтобы не тащить всю тяжелую библиотеку
+    ring_buffer.h             Реализация буфера
+    ring_buffer_perftests.h   Тесты производительности
+    ring_buffer_tests.h       Юнит-тесты
 
-Компиляция юнит-тестов через gcc/clang
+Компиляция на Linux
+===================
 
-    clang++ -g -O2 -Wall -Wextra -Wno-unused-function ring_buffer_tests.cpp -o ring_buffer_tests
+Консольные [и визуальные] юнит-тесты
 
-Компиляция юнит-тестов с визуальным выводом через gcc/clang
+    clang++ ring_buffer_tests.cpp -o ring_buffer_tests -g -O2 -Wall -Wextra -Wno-unused-function [-Dcimg_display=1 -lX11 -lpthread]
 
-    clang++ -g -O2 -Wall -Wextra -Wno-unused-function -Dcimg_display=1 ring_buffer_tests.cpp -o ring_buffer_tests -lX11 -lpthread
+Тесты производительности
 
-Компиляция тестов производительности через gcc/clang
+    clang++ ring_buffer_perftests.cpp -o ring_buffer_perftests -g -O2
 
-    clang++ -g -O2 ring_buffer_perftests.cpp -o ring_buffer_perftests
+Компиляция на Windows
+=====================
 
-Кросс-компиляция юнит-тестов для другого ABI через zig
+Консольные [и визуальные] юнит-тесты
+
+    :: Поменять кодировку на UTF-8
+    chcp 65001
+
+    cl /Zi /FC ring_buffer_tests.cpp /EHsc /DEBUG /O2 [/Dcimg_display=2]
+
+Кросс-компиляция
+================
+
+Юнит-тесты под конкретный ABI
 
     zig c++ -target x86_64-linux-gnu.2.16 -Wall -Werror -Wfatal-errors ring_buffer_tests.cpp -o ring_buffer_tests_gnu.2.16
 
-Профилирование
-==============
+Профилирование на Linux
+=======================
 
 Проверка на утечки памяти
 

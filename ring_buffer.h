@@ -1,7 +1,7 @@
 /**
  * @file ring_buffer.h
  * @author Stanislav Matkov (https://github.com/matkovst)
- * @brief Непрерывный закольцованный буфер
+ * @brief Магический круговой буфер
  * 
  */
 
@@ -18,7 +18,8 @@
     #include <sys/resource.h>
     #include <linux/version.h>
 #elif defined(_WIN32)
-    #error "No support for Windows"
+    #include <windows.h>
+    #pragma comment(lib, "onecore.lib") // Для VirtualAlloc2
 #elif defined(__APPLE__) && defined(__MACH__)
     #error "No support for Apple"
 #endif
@@ -37,13 +38,25 @@
 #include <sstream>
 #include <type_traits>
 
+#define RING_BUFFER_H_MIN(a, b) ((a) < (b) ? (a) : (b)) // Самописный макрос для предотвращения коллизий виндового min и std::min
+
+std::string syscallFailureMessage(const char*);
+
 static size_t getPageSize()
 {
+#if defined(__linux__)
     return static_cast<size_t>(sysconf(_SC_PAGESIZE));
+#elif defined(_WIN32)
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    return static_cast<size_t>(info.dwPageSize);
+#endif
 }
 
 static size_t getRamSize()
 {
+#if defined(__linux__)
+
     struct sysinfo si;
     if (sysinfo(&si) == 0)
         return static_cast<size_t>(si.totalram) * si.mem_unit; // Bytes
@@ -54,11 +67,33 @@ static size_t getRamSize()
     if (pages > 0 && page_size > 0)
         return pages * page_size; // Bytes
 
+#elif defined(_WIN32)
+
+    ULONGLONG kBytes = 0;
+
+    if (GetPhysicallyInstalledSystemMemory(&kBytes))
+    {
+        const uint64_t bytes = static_cast<uint64_t>(kBytes) * 1024;
+        if (bytes >= (std::pow<uint64_t>(2, sizeof(size_t)) - 1)) // Оперативки больше, чем адресов
+            return static_cast<size_t>(-1);
+        else
+            return static_cast<size_t>(bytes);
+    }
+    else
+    {
+        const auto explain = syscallFailureMessage("Failed to get physical memory size");
+        printf("%s\n", explain.c_str());
+    }
+
+#endif
+
     return 0;
 }
 
 static size_t getFileLimit()
 {
+#if defined(__linux__)
+
     struct rlimit limit;
     if (0 != getrlimit(RLIMIT_FSIZE, &limit))
     {
@@ -67,7 +102,62 @@ static size_t getFileLimit()
     }
 
     return (limit.rlim_cur == RLIM_INFINITY) ? static_cast<size_t>(-1) : static_cast<size_t>(limit.rlim_cur);
+
+#elif defined(_WIN32)
+
+    return getRamSize();
+
+#endif
 }
+
+inline std::string syscallFailureMessage(const char* msg)
+{
+#if defined(__linux__)
+
+    return std::string(msg) + ": " + std::strerror(errno);
+
+#elif defined(_WIN32)
+
+    struct ScopedLPVOID final
+    {
+        explicit ScopedLPVOID(LPVOID _ptr) : ptr(_ptr) { }
+        ~ScopedLPVOID() {if (ptr) LocalFree(ptr);}
+
+        LPVOID ptr {nullptr};
+    };
+
+    ScopedLPVOID errorBuffer16 {nullptr};
+    DWORD errorCode = GetLastError();
+    std::ostringstream log;
+
+    if (nullptr != msg)
+        log << msg << ": ";
+    else
+        log << "System error code: ";
+    log << errorCode;
+
+    if (DWORD bufferSize = FormatMessageW(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL, errorCode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWSTR) &errorBuffer16.ptr, 0, NULL))
+    {
+        // UTF-16 -> UTF-8
+        int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, (LPWSTR)errorBuffer16.ptr, static_cast<int>(bufferSize), NULL, 0, NULL, NULL);
+        if (0 == sizeNeeded)
+            return log.str();
+
+        std::string errorBuffer8(sizeNeeded, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, (LPWSTR)errorBuffer16.ptr, static_cast<int>(bufferSize), (LPSTR)errorBuffer8.data(), sizeNeeded, NULL, NULL);
+
+        std::string errorSubBuffer8 = errorBuffer8.substr(0, errorBuffer8.size()-2); // Последние символы битые. Причина не ясна.
+        log << ' ' << '(' << errorSubBuffer8 << ')';
+    }
+
+    return log.str();
+
+#endif
+}
+
+#if defined(__linux__)
 
 static utsname getLinuxSystem()
 {
@@ -90,12 +180,56 @@ int memfd_create(const char* name, unsigned int flags)
     return syscall(__NR_memfd_create, name, flags);
 }
 
-#endif
+#endif // #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0))
 
-inline std::string syscallFailureMessage(const char* msg)
+#endif // #if defined(__linux__)
+
+#if defined(_WIN32)
+
+static size_t getGranularity()
 {
-    return std::string(msg) + ": " + std::strerror(errno);
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    return static_cast<size_t>(info.dwAllocationGranularity);
 }
+
+typedef NTSTATUS(WINAPI* LPFN_RTLGETVERSION)(PRTL_OSVERSIONINFOEXW);
+static std::string getWindowsSystem()
+{
+    HMODULE hMod = GetModuleHandleW(L"ntdll.dll");
+    if (!hMod)
+        return std::string();
+
+    auto RtlGetVersion = (LPFN_RTLGETVERSION)GetProcAddress(hMod, "RtlGetVersion");
+    if (!RtlGetVersion)
+        return std::string();
+
+    RTL_OSVERSIONINFOEXW osInfo = { 0 };
+    osInfo.dwOSVersionInfoSize = sizeof(osInfo);
+
+    if (0 != RtlGetVersion(&osInfo))
+        return std::string();
+
+    std::string ver;
+    if (osInfo.dwMajorVersion == 10 && osInfo.dwBuildNumber >= 22000)
+        ver = "Windows 11 ";
+    else if (osInfo.dwMajorVersion == 10)
+        ver = "Windows 10 ";
+    else
+        ver = "Windows ";
+
+    ver += '(';
+    ver += std::to_string(osInfo.dwMajorVersion);
+    ver += '.';
+    ver += std::to_string(osInfo.dwMinorVersion);
+    ver += '.';
+    ver += std::to_string(osInfo.dwBuildNumber);
+    ver += ')';
+    return ver;
+}
+
+#endif // #if defined(_WIN32)
+
 
 /**
  * @brief Специальный аллокатор памяти под круговой буфер.
@@ -135,6 +269,8 @@ public:
 
         if (m_size > getRamSize())
             throw std::runtime_error("Buffer size must not exceed RAM size");
+
+    #if defined(__linux__)
 
         // Застолбить виртуальную область под будущее разбиение на 2 блока
         m_base = mmap(
@@ -212,20 +348,93 @@ public:
         if (MAP_FAILED == m_leftPage || MAP_FAILED == m_rightPage)
         {
             this->cleanup(fileDesc);
-            throw std::runtime_error(
-                syscallFailureMessage("Failed to map pages"));
+            throw std::runtime_error(syscallFailureMessage("Failed to map pages"));
         }
 
         // Дескриптор больше не нужен - закрыть
         if (close(fileDesc))
         {
-            const auto explain = syscallFailureMessage("Failed to close temp file");
-            printf("Error while constructing: %s", explain.c_str());
+            const auto explain = syscallFailureMessage("Failed to close temp file during construction");
+            printf("%s\n", explain.c_str());
         }
         else
         {
             fileDesc = -1; // на всякий случай
         }
+
+    #elif defined(_WIN32)
+
+        // Застолбить виртуальную область под будущее разбиение на 2 блока
+        m_base = VirtualAlloc2(
+            NULL, // Текущий процесс
+            NULL, // Дать системе подобрать адрес, выровненный по granularity
+            m_size << 1, // Объем
+            MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, // Тип: плейсхолдер
+            NULL, 0);
+        if (nullptr == m_base)
+        {
+            throw std::runtime_error(
+                syscallFailureMessage("Failed to reserve virtual space"));
+        }
+        if (!VirtualFree(m_base, m_size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER))
+        {
+            throw std::runtime_error(
+                syscallFailureMessage("Failed to free virtual space"));
+        }
+
+        // Создать временный файл для отображения в RAM
+
+        struct ScopedHandle final
+        {
+            explicit ScopedHandle(HANDLE _han) : han(_han) { }
+            ~ScopedHandle()
+            {
+                if (nullptr != han)
+                {
+                    if (CloseHandle(han))
+                    {
+                        han = INVALID_HANDLE_VALUE;
+                    }
+                    else
+                    {
+                        const auto explain = syscallFailureMessage("Failed to close handle");
+                        printf("%s\n", explain.c_str());
+                    }
+                };
+            }
+
+            HANDLE han {nullptr};
+        };
+
+        HANDLE fileDesc = CreateFileMappingW(
+            INVALID_HANDLE_VALUE,   // Файл подкачки
+            NULL,                   // Защита по умолчанию
+            PAGE_READWRITE,         // Доступ на чтение/запись
+            0, size,                // Размер
+            NULL);
+        ScopedHandle fileDescRaii {fileDesc};
+
+        // Расположить виртуальные блоки по заданному адресу, 
+        // привязать физическую область памяти
+
+        m_leftPage = MapViewOfFile3(
+            fileDesc, NULL, 
+            m_base, 
+            0, size, 
+            MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
+        m_rightPage = MapViewOfFile3(
+            fileDesc, NULL, 
+            (void*)(reinterpret_cast<char*>(m_base) + size), 
+            0, size, 
+            MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
+
+        if (nullptr == m_leftPage || nullptr == m_rightPage)
+        {
+            this->cleanup();
+            throw std::runtime_error(syscallFailureMessage("Failed to map pages"));
+        }
+
+    #endif
 
         assert(0 != this->m_size);
         assert(nullptr != this->m_base);
@@ -283,6 +492,8 @@ public:
 private:
     void cleanup(int fileDesc = -1) noexcept
     {
+    #if defined(__linux__)
+
         if (m_base && m_size > 0)
         {
         #ifdef __MEMCHECK_H
@@ -290,8 +501,8 @@ private:
         #endif
             if (0 != munmap(m_base, m_size << 1))
             {
-                const auto explain = syscallFailureMessage("Failed to ummap pages");
-                printf("Error while cleaning up: %s", explain.c_str());
+                const auto explain = syscallFailureMessage("Failed to ummap pages during cleaning up");
+                printf("%s\n", explain.c_str());
             }
         }
 
@@ -299,10 +510,31 @@ private:
         {
             if (0 != close(fileDesc))
             {
-                const auto explain = syscallFailureMessage("Failed to close temp file");
-                printf("Error while cleaning up: %s", explain.c_str());
+                const auto explain = syscallFailureMessage("Failed to close temp file during cleaning up");
+                printf("%s\n", explain.c_str());
             }
         }
+
+    #elif defined(_WIN32)
+
+        if (m_leftPage)
+        {
+            if(!UnmapViewOfFile(m_leftPage))
+            {
+                const auto explain = syscallFailureMessage("Failed to ummap left block during cleaning up");
+                printf("%s\n", explain.c_str());
+            }
+        }
+        if (m_rightPage)
+        {
+            if (!UnmapViewOfFile(m_rightPage))
+            {
+                const auto explain = syscallFailureMessage("Failed to ummap right block during cleaning up");
+                printf("%s\n", explain.c_str());
+            }
+        }
+
+    #endif
     }
 
 private:
@@ -506,7 +738,7 @@ private:
     {
         m_headIdx = (m_headIdx + 1) % m_capacity;
         m_head = reinterpret_cast<uint8_t*>(m_allocator.left()) + m_headIdx*m_elemSize;
-        m_size = std::min(m_size + 1, m_capacity);
+        m_size = RING_BUFFER_H_MIN(m_size + 1, m_capacity);
     }
 
 private:

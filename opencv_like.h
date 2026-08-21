@@ -313,12 +313,14 @@ static void randu(Mat& dst, double low, double high)
     case CV_8UC1:
     case CV_8UC3:
     {
-        std::uniform_int_distribution<uint8_t> distrib(static_cast<uint8_t>(low), 
-                                                       static_cast<uint8_t>(high));
+        // Зачем разыгрывать unsigned, если можно сразу uint8_t?
+        // Спроси у Билла Гейтса: F:\Microsoft Visual Studio 14.0\VC\INCLUDE\random(2387): error C2338: invalid template argument for uniform_int_distribution
+        std::uniform_int_distribution<unsigned> distrib(static_cast<unsigned>(low), 
+                                                        static_cast<unsigned>(high));
         for (size_t i = 0; i < dst.total(); ++i)
         {
             for (int c = 0; c < dst.channels(); ++c)
-                ((uint8_t*)dst.data)[i*dst.channels() + c] = distrib(gen);
+                ((uint8_t*)dst.data)[i*dst.channels() + c] = static_cast<uint8_t>(distrib(gen));
         }
         break;
     }
