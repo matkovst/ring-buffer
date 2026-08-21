@@ -153,66 +153,81 @@ public:
     #endif
 
         // Узнать версию ядра.
-        // Создать временный файл для отображения в RAM
 
         int major = 0;
         int minor = 0;
         int patch = 0;
         int matched = sscanf(getLinuxSystem().release, "%d.%d.%d", &major, &minor, &patch);
         const bool oldLinux = (matched >= 2 && (major > 3 || (major == 3 && minor >= 17)));
+
+        // Создать временный файл для отображения в RAM
+
+        int fileDesc = -1;
+        char fileName[4096] = {};
+
         if (oldLinux) // Реализация через настоящий, временный файл (< Linux 3.17)
         {
-            strcpy(m_fileName, "/tmp/ring_buffer_tempfile_XXXXXX");
-            m_fileDesc = mkstemp(m_fileName); // Создать уникальный временный файл
+            strcpy(fileName, "/tmp/ring_buffer_tempfile_XXXXXX");
+            fileDesc = mkstemp(fileName); // Создать уникальный временный файл
         }
         else // Реализация через анонимный файл
         {
-            strcpy(m_fileName, "ring_buffer_tempfile"); // Файл не хранится на диске, поэтому название не обязано быть уникальным https://man7.org/linux/man-pages/man2/memfd_create.2.html
-            m_fileDesc = memfd_create(m_fileName, MFD_CLOEXEC); // Создать уникальный анонимный файл
+            strcpy(fileName, "ring_buffer_tempfile"); // Файл не хранится на диске, поэтому название не обязано быть уникальным https://man7.org/linux/man-pages/man2/memfd_create.2.html
+            fileDesc = memfd_create(fileName, MFD_CLOEXEC); // Создать уникальный анонимный файл
         }
 
-        if (-1 == m_fileDesc)
+        if (-1 == fileDesc)
         {
-            this->cleanup();
+            this->cleanup(fileDesc);
             throw std::runtime_error(
                 syscallFailureMessage("Failed to create temp file"));
         }
 
         if (oldLinux)
         {
-            if (0 != unlink(m_fileName)) // Файл будет удалён сам, после закрытия дескриптора
+            if (0 != unlink(fileName)) // Файл будет удалён сам, после закрытия дескриптора
             {
-                this->cleanup();
+                this->cleanup(fileDesc);
                 throw std::runtime_error(
                     syscallFailureMessage("Failed to unlink temp file"));
             }
         }
 
-        if (-1 == ftruncate(m_fileDesc, m_size))
+        if (-1 == ftruncate(fileDesc, m_size))
         {
-            this->cleanup();
+            this->cleanup(fileDesc);
             throw std::runtime_error(
                 syscallFailureMessage("Failed to set temp file size"));
         }
 
-        // Подложить виртуальные блоки по заданному адресу, 
+        // Расположить виртуальные блоки по заданному адресу, 
         // привязать физическую область памяти
 
         m_leftPage = /* page-aligned */ mmap(
             m_base, m_size, 
-            PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, m_fileDesc, 0);
+            PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fileDesc, 0);
         m_rightPage = /* page-aligned */ mmap(
             static_cast<char*>(m_base) + m_size, m_size, 
-            PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, m_fileDesc, 0);
+            PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fileDesc, 0);
         if (MAP_FAILED == m_leftPage || MAP_FAILED == m_rightPage)
         {
-            this->cleanup();
+            this->cleanup(fileDesc);
             throw std::runtime_error(
                 syscallFailureMessage("Failed to map pages"));
         }
 
+        // Дескриптор больше не нужен - закрыть
+        if (close(fileDesc))
+        {
+            const auto explain = syscallFailureMessage("Failed to close temp file");
+            printf("Error while constructing: %s", explain.c_str());
+        }
+        else
+        {
+            fileDesc = -1; // на всякий случай
+        }
+
         assert(0 != this->m_size);
-        assert(-1 != m_fileDesc);
         assert(nullptr != this->m_base);
         assert(nullptr != this->m_leftPage);
         assert(nullptr != this->m_rightPage);
@@ -224,18 +239,13 @@ public:
     RingAllocator& operator=(const RingAllocator&) = delete;
 
     RingAllocator(RingAllocator&& other) noexcept
-        : m_size(other.m_size), m_fileDesc(other.m_fileDesc), m_base(other.m_base)
+        : m_size(other.m_size), m_base(other.m_base)
         , m_leftPage(other.m_leftPage), m_rightPage(other.m_rightPage)
     {
         other.m_size        = 0;
-        other.m_fileDesc    = -1;
         other.m_base        = nullptr;
         other.m_leftPage    = nullptr;
         other.m_rightPage   = nullptr;
-
-        strcpy(this->m_fileName, other.m_fileName);
-        memset(other.m_fileName, 0, sizeof(other.m_fileName));
-        other.m_fileName[0] = '\0';
     }
     RingAllocator& operator=(RingAllocator&& other) noexcept
     {
@@ -243,20 +253,14 @@ public:
             return *this;
 
         this->m_size        = other.m_size;
-        this->m_fileDesc    = other.m_fileDesc;
         this->m_base        = other.m_base;
         this->m_leftPage    = other.m_leftPage;
         this->m_rightPage   = other.m_rightPage;
 
         other.m_size        = 0;
-        other.m_fileDesc    = -1;
         other.m_base        = nullptr;
         other.m_leftPage    = nullptr;
         other.m_rightPage   = nullptr;
-
-        strcpy(this->m_fileName, other.m_fileName);
-        memset(other.m_fileName, 0, sizeof(other.m_fileName));
-        other.m_fileName[0] = '\0';
 
         return *this;
     }
@@ -277,7 +281,7 @@ public:
     size_t size() const noexcept {return m_size;}
 
 private:
-    void cleanup() noexcept
+    void cleanup(int fileDesc = -1) noexcept
     {
         if (m_base && m_size > 0)
         {
@@ -291,9 +295,9 @@ private:
             }
         }
 
-        if (-1 != m_fileDesc)
+        if (-1 != fileDesc)
         {
-            if (0 != close(m_fileDesc))
+            if (0 != close(fileDesc))
             {
                 const auto explain = syscallFailureMessage("Failed to close temp file");
                 printf("Error while cleaning up: %s", explain.c_str());
@@ -303,8 +307,6 @@ private:
 
 private:
     size_t m_size           {0};        // Размер буфера (в байтах), кратный размеру страницы
-    char   m_fileName[256]  {};         // Имя временного файла
-    int    m_fileDesc       {-1};       // Дескриптор временного файла
     void*  m_base           {nullptr};  // Подложка для виртуальных блоков
     void*  m_leftPage       {nullptr};  // Левый виртуальный блок
     void*  m_rightPage      {nullptr};  // Правый виртуальный блок
