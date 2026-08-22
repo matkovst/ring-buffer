@@ -21,7 +21,7 @@
     #include <windows.h>
     #pragma comment(lib, "onecore.lib") // Для VirtualAlloc2
 #elif defined(__APPLE__) && defined(__MACH__)
-    #error "No support for Apple"
+    #error "No implementation for Apple"
 #endif
 
 #if defined(__has_include)
@@ -59,13 +59,13 @@ static size_t getRamSize()
 
     struct sysinfo si;
     if (sysinfo(&si) == 0)
-        return static_cast<size_t>(si.totalram) * si.mem_unit; // Bytes
+        return static_cast<size_t>(si.totalram) * si.mem_unit; // в байтах
     
-    // Alternative POSIX fallback
+    // Альтернативный способ
     size_t pages = sysconf(_SC_PHYS_PAGES);
     size_t page_size = getPageSize();
     if (pages > 0 && page_size > 0)
-        return pages * page_size; // Bytes
+        return pages * page_size; // в байтах
 
 #elif defined(_WIN32)
 
@@ -74,7 +74,7 @@ static size_t getRamSize()
     if (GetPhysicallyInstalledSystemMemory(&kBytes))
     {
         const uint64_t bytes = static_cast<uint64_t>(kBytes) * 1024;
-        if (bytes >= (std::pow<uint64_t>(2, sizeof(size_t)) - 1)) // Оперативки больше, чем адресов
+        if (bytes >= (std::pow<uint64_t>(2, sizeof(size_t)) - 1)) // Оперативы больше, чем адресов
             return static_cast<size_t>(-1);
         else
             return static_cast<size_t>(bytes);
@@ -237,15 +237,15 @@ static std::string getWindowsSystem()
  *        left.data[0] == right.data[0]
  * 
  *            Left virtual pages   |   Right virtual pages
- *        _________________________|________________________
+ *         ________________________|________________________
  *        |____|____|____|____|____|____|____|____|____|____|
  *                           \           /
  *                            \         /
  *                             \       /
  * 
  *                           Physical pages
- *                     _________________________
- *                     |____|____|___|____|____|
+ *                      ________________________
+ *                     |____|____|____|____|____|
  */
 class RingAllocator
 {
@@ -359,7 +359,7 @@ public:
         }
         else
         {
-            fileDesc = -1; // на всякий случай
+            fileDesc = -1; // На всякий случай
         }
 
     #elif defined(_WIN32)
@@ -389,11 +389,11 @@ public:
             explicit ScopedHandle(HANDLE _han) : han(_han) { }
             ~ScopedHandle()
             {
-                if (nullptr != han)
+                if (nullptr != han && INVALID_HANDLE_VALUE != han)
                 {
                     if (CloseHandle(han))
                     {
-                        han = INVALID_HANDLE_VALUE;
+                        han = INVALID_HANDLE_VALUE; // На всякий случай
                     }
                     else
                     {
@@ -554,11 +554,11 @@ class RingBuffer
 {
 public:
 #if INTPTR_MAX == INT32_MAX
-    using arch_int_t = int32_t;
-    using arch_uint_t = uint32_t;
+    using idx_t = int32_t;
+    using uidx_t = uint32_t;
 #elif INTPTR_MAX == INT64_MAX
-    using arch_int_t = int64_t;
-    using arch_uint_t = uint64_t;
+    using idx_t = int64_t;
+    using uidx_t = uint64_t;
 #else
     #error "Unsupported pointer size"
 #endif
@@ -597,6 +597,13 @@ public:
     }
     RingBuffer& operator=(RingBuffer&& other) = default;
 
+    /**
+     * @brief Записать в буфер elemSize байт данных по указателю.
+     * 
+     * @param src указатель на elemSize байт данных
+     * 
+     * @note Временная сложность O(N = elemSize), пространственная O(1)
+     */
     void put(const void* src)
     {
     #ifdef _RINGBUFFER_TRACE
@@ -614,6 +621,9 @@ public:
     #endif
     }
 
+    /**
+     * @brief TODO: Записать в буфер объект
+     */
     template<typename T>
     void put2(const T& obj)
     {
@@ -624,31 +634,9 @@ public:
                     << " into buffer with expected element sizeof(" << m_elemSize << ')';
             throw std::runtime_error(explain.str());
         }
+
+        // TODO
     }
-
-    // void* get(int64_t idx) const
-    // {
-    //     if (idx < 0)
-    //     {
-    //         if (idx < -static_cast<int64_t>(m_capacity))
-    //         {
-    //             throw std::out_of_range(
-    //                 std::string("Trying to access out-of-range index (") + 
-    //                 std::to_string(idx) + " < -" + std::to_string(m_capacity) + ')');
-    //         }
-
-    //         return (uint8_t*)m_head + (m_capacity + idx)*m_elemSize;
-    //     }
-
-    //     if (static_cast<uint64_t>(idx) >= m_capacity)
-    //     {
-    //         throw std::out_of_range(
-    //             std::string("Trying to access out-of-range index (") + 
-    //             std::to_string(idx) + " >= " + std::to_string(m_capacity) + ')');
-    //     }
-
-    //     return (uint8_t*)m_head + idx*m_elemSize;
-    // }
 
     /**
      * @brief Указатель на элемент по номеру в очереди
@@ -660,13 +648,13 @@ public:
 #if __cplusplus >= 202002L
     requires std::is_pointer_v<T>
 #endif
-    T element(arch_int_t idx) const
+    T element(idx_t idx) const
     {
         static_assert(std::is_pointer<T>::value, "Template type T must be a pointer type");
 
         if (idx < 0)
         {
-            if (idx < -static_cast<arch_int_t>(m_size))
+            if (idx < -static_cast<idx_t>(m_size))
             {
                 throw std::out_of_range(
                     std::string("Trying to access out-of-range index (") + 
@@ -678,7 +666,7 @@ public:
                 reinterpret_cast<uint8_t*>(m_allocator.left()) + idx*m_elemSize);
         }
 
-        if (static_cast<arch_uint_t>(idx) >= m_size)
+        if (static_cast<uidx_t>(idx) >= m_size)
         {
             throw std::out_of_range(
                 std::string("Trying to access out-of-range index (") + 
@@ -691,7 +679,7 @@ public:
     }
 
     /**
-     * @brief Указатель на элемент по расположению в плоской памяти
+     * @brief Указатель на элемент по индексу расположения в памяти
      * 
      * @param idx номер в очереди (0 - первый, -1 / size-1 - последний)
      * @return T выходной тип указателя
@@ -714,12 +702,19 @@ public:
     }
 
     /**
-     * @brief Указатель на следующий свободный слот для вставки элемента.
+     * @brief Указатель на следующий свободный слот для записи элемента.
+     * 
+     *        Элемент записывает вызывающая сторона. После вызова метода указатель перейдет к следующему слоту, 
+     *        в независимости от того, был ли элемент записан или нет.
      * 
      *        Метод полезен для конструирования объектов-вьюшек / заголовков над данными, 
      *        конструктор которых принимает указатель на ячейку памяти, где должны лежать данные.
+     * 
+     *        Пример: cv::Mat({16,16,16}, CV_32F, ring.seek());
+     * 
+     * @note Сложность O(1)
      */
-    void* head()
+    void* seek()
     {
         void* prevHead = m_head;
         this->proceed();

@@ -361,14 +361,14 @@ TEST_CASE("test_access")
         }
     }
 
-    // Заполнение буфера методом head(), проверка element() и room()
+    // Заполнение буфера методом seek(), проверка element() и room()
     {
         const size_t capacity = 4;
         constexpr size_t elemSize = sizeof(Sample1024);
         RingBuffer ring(capacity, elemSize);
 
         {
-            Sample1024* sample = new (ring.head()) Sample1024();
+            Sample1024* sample = new (ring.seek()) Sample1024();
             sample->line = 4;
 
             CHECK(4 == ring.element<const Sample1024*>(0)->line);
@@ -377,7 +377,7 @@ TEST_CASE("test_access")
             CHECK(4 == ring.room<const Sample1024*>(0)->line);
         }
         {
-            Sample1024* sample = new (ring.head()) Sample1024();
+            Sample1024* sample = new (ring.seek()) Sample1024();
             sample->line = 8;
 
             CHECK(4 == ring.element<const Sample1024*>(0)->line);
@@ -389,7 +389,7 @@ TEST_CASE("test_access")
             CHECK(8 == ring.room<const Sample1024*>(1)->line);
         }
         {
-            Sample1024* sample = new (ring.head()) Sample1024();
+            Sample1024* sample = new (ring.seek()) Sample1024();
             sample->line = 15;
 
             CHECK(4 == ring.element<const Sample1024*>(0)->line);
@@ -404,7 +404,7 @@ TEST_CASE("test_access")
             CHECK(15 == ring.room<const Sample1024*>(2)->line);
         }
         {
-            Sample1024* sample = new (ring.head()) Sample1024();
+            Sample1024* sample = new (ring.seek()) Sample1024();
             sample->line = 16;
 
             CHECK(4 == ring.element<const Sample1024*>(0)->line);
@@ -422,7 +422,7 @@ TEST_CASE("test_access")
             CHECK(16 == ring.room<const Sample1024*>(3)->line);
         }
         {
-            Sample1024* sample = new (ring.head()) Sample1024();
+            Sample1024* sample = new (ring.seek()) Sample1024();
             sample->line = 23;
 
             CHECK(8 == ring.element<const Sample1024*>(0)->line);
@@ -440,7 +440,7 @@ TEST_CASE("test_access")
             CHECK(16 == ring.room<const Sample1024*>(3)->line);
         }
         {
-            Sample1024* sample = new (ring.head()) Sample1024();
+            Sample1024* sample = new (ring.seek()) Sample1024();
             sample->line = 42;
 
             CHECK(15 == ring.element<const Sample1024*>(0)->line);
@@ -459,7 +459,7 @@ TEST_CASE("test_access")
         }
     }
 
-    // Заполнение буфера методом head(), проверка кол-ва элементов и содержимого буфера
+    // Заполнение буфера методом seek(), проверка кол-ва элементов и содержимого буфера
     {
         const size_t capacity = 4;
         constexpr size_t elemSize = sizeof(Sample1024);
@@ -470,7 +470,7 @@ TEST_CASE("test_access")
                                 ValueSize{3, 4ul}, ValueSize{4, 4ul}, ValueSize{5, 4ul}, 
                                 ValueSize{6, 4ul}})
         {
-            Sample1024* sample = new (ring.head()) Sample1024();
+            Sample1024* sample = new (ring.seek()) Sample1024();
             sample->line = value_size.value;
 
             CHECK(value_size.size == ring.size());
@@ -479,7 +479,7 @@ TEST_CASE("test_access")
         }
     }
 
-    // #2 Заполнение буфера методом head(), проверка кол-ва элементов и содержимого буфера
+    // #2 Заполнение буфера методом seek(), проверка кол-ва элементов и содержимого буфера
     {
         struct SampleView {double* data {nullptr};};
 
@@ -496,7 +496,7 @@ TEST_CASE("test_access")
             const size_t size = std::min(i+1, ring.capacity());
             const double value = 0.5 - static_cast<double>(i);
 
-            SampleView view; view.data = reinterpret_cast<double*>(ring.head());
+            SampleView view; view.data = reinterpret_cast<double*>(ring.seek());
             CHECK(size == ring.size());
             CHECK(nullptr != view.data);
             CHECK(nullptr != ring.element(-1));
@@ -547,7 +547,7 @@ TEST_CASE("test_mat_storage")
 
         for (size_t i = 0; i < 3*ring.capacity(); ++i)
         {
-            Mat image2d(shape.rows, shape.cols, shape.type, ring.head());
+            Mat image2d(shape.rows, shape.cols, shape.type, ring.seek());
             randu(image2d, 0.0, 255.0);
 
             const Mat retrievedImage2d(shape.rows, shape.cols, shape.type, ring.element(-1));
@@ -662,7 +662,7 @@ TEST_CASE("test_video_storage" * doctest::skip(true))
             const unsigned char white[] = { 255, 255, 255 };
             const unsigned char black[] = {   0,   0,   0 };
 
-            const uint8_t* head = (const uint8_t*)ring.head();
+            const uint8_t* head = (const uint8_t*)ring.seek();
             const uint8_t* tail = &head[ring.elemSize()];
             CImg<uint8_t> cFrame(head, cols, rows, 1, 3, true);
             cFrame.load_bmp(frameFile.c_str());
