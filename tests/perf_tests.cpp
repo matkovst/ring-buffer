@@ -1,7 +1,8 @@
 /**
- * @file ring_buffer_perftests.cpp
+ * @file perf_tests.cpp
  * @author Stanislav Matkov (https://github.com/matkovst)
- * @brief Профилирование кольцевого буфера
+ * @brief Профилирование магического кругового буфера
+ * 
  */
 
 #include <cstdint>
@@ -10,7 +11,7 @@
 #include <cstring>
 #include <type_traits>
 
-#include "ring_buffer.h"
+#include "../ring_buffer.h"
 
 #if defined(_MSC_VER)
     #define FORCE_INLINE __forceinline

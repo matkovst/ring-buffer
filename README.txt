@@ -9,23 +9,24 @@
     - Компилятор с поддержкой C++11 и выше
 
 Состав проекта:
-    3rdparty/                 Сторонние библиотеки для упрощения тестирования
-    data/                     Тестовая раскадровка
-    opencv_like.h             Частичный копипаст функционала из OpenCV Core чтобы не тащить всю тяжелую библиотеку
+    tests/
+        3rdparty/             Сторонние библиотеки для упрощения тестирования
+        data/                 Тестовая раскадровка
+        opencv_like.h         Частичный копипаст функционала из OpenCV Core чтобы не тащить всю тяжелую библиотеку
+        perf_tests.cpp        Тесты производительности
+        tests.cpp             Юнит-тесты
     ring_buffer.h             Реализация буфера
-    ring_buffer_perftests.h   Тесты производительности
-    ring_buffer_tests.h       Юнит-тесты
 
 Компиляция на Linux
 ===================
 
 Консольные [и визуальные] юнит-тесты
 
-    clang++ ring_buffer_tests.cpp -o ring_buffer_tests -g -O2 -Wall -Wextra -Wno-unused-function [-Dcimg_display=1 -lX11 -lpthread]
+    clang++ tests/tests.cpp -o tests -g -O2 -Wall -Wextra -Wno-unused-function [-Dcimg_display=1 -lX11 -lpthread]
 
 Тесты производительности
 
-    clang++ ring_buffer_perftests.cpp -o ring_buffer_perftests -g -O2
+    clang++ tests/perf_tests.cpp -o perf_tests -g -O2
 
 Компиляция на Windows
 =====================
@@ -35,25 +36,25 @@
     :: Поменять кодировку на UTF-8
     chcp 65001
 
-    cl /Zi /FC ring_buffer_tests.cpp /EHsc /DEBUG /O2 [/Dcimg_display=2]
+    cl /Zi /FC tests\tests.cpp /EHsc /DEBUG /O2 [/Dcimg_display=2]
 
 Кросс-компиляция
 ================
 
 Юнит-тесты под конкретный ABI
 
-    zig c++ -target x86_64-linux-gnu.2.16 -Wall -Werror -Wfatal-errors ring_buffer_tests.cpp -o ring_buffer_tests_gnu.2.16
+    zig c++ -target x86_64-linux-gnu.2.16 -Wall -Werror -Wfatal-errors tests\tests.cpp -o tests_gnu.2.16
 
 Профилирование на Linux
 =======================
 
 Проверка на утечки памяти
 
-    valgrind --leak-check=full --show-leak-kinds=all ./ring_buffer_tests
+    valgrind --leak-check=full --show-leak-kinds=all ./tests
 
 Профилирование по системных счетчикам
 
-    perf stat --repeat=32 -dd ./ring_buffer_perftests ring read 1
+    perf stat --repeat=32 -dd ./perf_tests ring read 1
 
     argv[1] - тип теста    : malloc, mmap, ring
     argv[2] - операция     : read, write
@@ -61,5 +62,5 @@
 
 Поиск узких мест
 
-    perf record -e instructions,branches,branch-misses ./ring_buffer_perftests ring read 1
+    perf record -e instructions,branches,branch-misses ./perf_tests ring read 1
     perf report

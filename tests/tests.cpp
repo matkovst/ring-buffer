@@ -1,16 +1,7 @@
 /**
- * @file ring_buffer_tests.cpp
+ * @file tests.cpp
  * @author Stanislav Matkov (https://github.com/matkovst)
- * @brief Модульное тестирование кольцевого буфера (RingBuffer)
- * 
- *  Пример компиляции (Linux):
- *      clang++ ring_buffer_tests.cpp -Wall -Wextra -Wno-unused-function -o test
- * 
- *  Пример компиляции (Linux + CImg):
- *      clang++ ring_buffer_tests.cpp -Wall -Wextra -Wno-unused-function -Dcimg_display=1 -o test -lX11 -lpthread
- * 
- *  Пример компиляции (Windows + CImg):
- *      cl /FC ring_buffer_tests.cpp /EHsc /std:c++17 /Dcimg_display=2
+ * @brief Модульное тестирование магического кругового буфера (RingBuffer)
  * 
  */
 
@@ -28,7 +19,7 @@
 #include <new>
 
 // #define _RINGBUFFER_TRACE // закомментить в проде
-#include "ring_buffer.h"
+#include "../ring_buffer.h"
 
 #include "opencv_like.h" // Для теста
 
