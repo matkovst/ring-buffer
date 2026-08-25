@@ -18,7 +18,6 @@
 #include <utility>
 #include <new>
 
-// #define _RINGBUFFER_TRACE // закомментить в проде
 #include "../ring_buffer.h"
 
 #include "opencv_like.h" // Для теста

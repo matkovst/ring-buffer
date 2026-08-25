@@ -260,6 +260,12 @@ public:
         if (0 == m_size)
             throw std::runtime_error("Empty buffer not allowed");
 
+        if (m_size >= getFileLimit()) // Учёт ограничений процесса
+        {
+            throw std::runtime_error("Buffer size " + std::to_string(m_size) + 
+                                     " exceeded " + std::to_string(getFileLimit()) + " bytes limit");
+        }
+
         if (m_size % getPageSize() != 0)
         {
             std::ostringstream explain;
@@ -340,11 +346,15 @@ public:
         // привязать физическую область памяти
 
         m_leftPage = /* page-aligned */ mmap(
-            m_base, m_size, 
-            PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fileDesc, 0);
+            m_base, m_size,                     // Адрес и размер блока
+            PROT_READ | PROT_WRITE,             // Права доступа к блоку
+            MAP_SHARED | MAP_FIXED, fileDesc, 0 // Привязать анонимный файл к блоку по заданному адресу
+            );
         m_rightPage = /* page-aligned */ mmap(
-            static_cast<char*>(m_base) + m_size, m_size, 
-            PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fileDesc, 0);
+            static_cast<char*>(m_base) + m_size, m_size,    // Адрес и размер блока
+            PROT_READ | PROT_WRITE,                         // Права доступа к блоку
+            MAP_SHARED | MAP_FIXED, fileDesc, 0             // Привязать анонимный файл к блоку по заданному адресу
+            );
         if (MAP_FAILED == m_leftPage || MAP_FAILED == m_rightPage)
         {
             this->cleanup(fileDesc);
@@ -410,7 +420,7 @@ public:
             INVALID_HANDLE_VALUE,   // Файл подкачки
             NULL,                   // Защита по умолчанию
             PAGE_READWRITE,         // Доступ на чтение/запись
-            0, size,                // Размер
+            0, m_size,              // Размер
             NULL);
         ScopedHandle fileDescRaii {fileDesc};
 
@@ -418,15 +428,15 @@ public:
         // привязать физическую область памяти
 
         m_leftPage = MapViewOfFile3(
-            fileDesc, NULL, 
-            m_base, 
-            0, size, 
-            MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
+            fileDesc, NULL,                                     // Файл подкачки, текущий процесс
+            m_base, 0, m_size,                                  // Адрес и размер блока
+            MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0    // Заполнить подложку, отобразить блок в файл подкачки
+            );
         m_rightPage = MapViewOfFile3(
-            fileDesc, NULL, 
-            (void*)(reinterpret_cast<char*>(m_base) + size), 
-            0, size, 
-            MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
+            fileDesc, NULL,                                                 // Файл подкачки, текущий процесс
+            (void*)(reinterpret_cast<char*>(m_base) + m_size), 0, m_size,   // Адрес и размер блока
+            MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0                // Заполнить подложку, отобразить блок в файл подкачки
+            );
 
         if (nullptr == m_leftPage || nullptr == m_rightPage)
         {
@@ -606,19 +616,11 @@ public:
      */
     void put(const void* src)
     {
-    #ifdef _RINGBUFFER_TRACE
-        printf("ENTER RingBuffer::put(%p): m_headIdx=%ld, m_head=%p, m_size=%ld\n", src, m_headIdx, m_head, m_size);
-    #endif
-
         if (nullptr == src)
             throw std::runtime_error("Putting NULL pointer not allowed");
 
         memcpy(m_head, src, m_elemSize);
         this->proceed();
-
-    #ifdef _RINGBUFFER_TRACE
-        printf("EXIT  RingBuffer::put(%p): m_headIdx=%ld, m_head=%p, m_size=%ld\n", src, m_headIdx, m_head, m_size);
-    #endif
     }
 
     /**
